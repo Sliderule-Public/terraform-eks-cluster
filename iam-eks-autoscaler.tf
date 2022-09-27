@@ -1,5 +1,4 @@
 resource "aws_iam_role" "eks-autoscaler" {
-  count = var.deploy_eks == true ? 1 : 0
   name  = "${var.company_name}-${var.environment}-eks-autoscaler"
 
   assume_role_policy = <<POLICY

@@ -24,7 +24,7 @@ data "aws_ami" "eks" {
 }
 
 module "shared_eks_launch_template" {
-  source                      = "../src/modules/simple/launch_template"
+  source                      = "git@github.com:Modern-Logic/terraform-modules.git//simple/launch_template"
   environment                 = var.environment
   company_name                = var.company_name
   tags                        = var.tags
@@ -42,8 +42,7 @@ module "shared_eks_launch_template" {
 }
 
 resource "aws_eks_node_group" "main" {
-  count           = var.deploy_eks == true ? 1 : 0
-  cluster_name    = aws_eks_cluster.main[0].name
+  cluster_name    = aws_eks_cluster.main.name
   node_group_name = "${var.environment}-eks"
   node_role_arn   = aws_iam_role.eks.arn
   subnet_ids      = local.private_subnet_ids

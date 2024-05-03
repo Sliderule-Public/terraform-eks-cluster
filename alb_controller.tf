@@ -1,5 +1,5 @@
-resource "aws_iam_role" "eks-alb-controller" {
-  name  = "${var.environment}-eks-alb-controller"
+resource "aws_iam_role" "eks_alb_controller" {
+  name = "${var.name}-eks-alb-controller"
 
   assume_role_policy = <<POLICY
 {
@@ -22,22 +22,21 @@ resource "aws_iam_role" "eks-alb-controller" {
     {
       "Effect": "Allow",
       "Principal": {
-          "Federated": "${aws_iam_openid_connect_provider.main.arn}"
+          "Federated": "${module.eks.oidc_provider_arn}"
       },
       "Action": "sts:AssumeRoleWithWebIdentity",
       "Condition": {
         "StringEquals": {
-            "${aws_iam_openid_connect_provider.main.url}:sub": "system:serviceaccount:kube-system:aws-load-balancer-controller",
-            "${aws_iam_openid_connect_provider.main.url}:aud": "sts.amazonaws.com"
+            "${module.eks.oidc_provider_arn}:sub": "system:serviceaccount:kube-system:aws-load-balancer-controller",
+            "${module.eks.oidc_provider_arn}:aud": "sts.amazonaws.com"
         }
       }
     }
   ]
 }
 POLICY
-  # This policy has everything needed for ALB management and EKS CNI management
   inline_policy {
-    name   = "eks-alb-${var.environment}"
+    name   = "eks-alb-${var.name}"
     policy = <<-EOF
   {
   	"Version": "2012-10-17",
@@ -285,4 +284,62 @@ POLICY
   }
   EOF
   }
+}
+
+resource "kubernetes_namespace" "alb_controller" {
+  depends_on = [null_resource.wait_for_cluster]
+  metadata {
+    name = local.alb_controller_name
+  }
+}
+
+resource "kubernetes_service_account" "alb_controller" {
+  depends_on = [
+    kubernetes_namespace.alb_controller,
+    null_resource.wait_for_cluster
+  ]
+  metadata {
+    name        = local.alb_controller_name
+    namespace   = local.alb_controller_name
+    annotations = { "eks.amazonaws.com/role-arn" = aws_iam_role.eks_alb_controller.arn }
+  }
+}
+
+resource "helm_release" "alb_controller" {
+  depends_on = [
+    kubernetes_service_account.alb_controller,
+    null_resource.wait_for_karpenter,
+    null_resource.wait_for_cluster
+  ]
+  name       = "alb-controller"
+  repository = "https://aws.github.io/eks-charts"
+  chart      = "aws-load-balancer-controller"
+  version    = "1.6.1"
+  namespace  = local.alb_controller_name
+  wait       = true
+
+  set {
+    name  = "serviceAccount.name"
+    value = local.alb_controller_name
+  }
+
+  set {
+    name  = "serviceAccount.create"
+    value = false
+  }
+
+  set {
+    name  = "clusterName"
+    value = module.eks.cluster_name
+  }
+}
+
+resource "time_sleep" "wait_for_alb_controller" {
+  depends_on = [helm_release.alb_controller]
+
+  create_duration = "30s"
+}
+
+resource "null_resource" "wait_for_alb_controller" {
+  depends_on = [time_sleep.wait_for_alb_controller]
 }
